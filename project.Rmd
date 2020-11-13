@@ -1,0 +1,166 @@
+---
+title: "Practical Machine Learning Project"
+author: "Bri"
+date: "11/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+In this project the objective is to use machine learning to predict the manner in which individuals perform certain exercises. The data was created from wearable accelerometers. 
+
+We will first read in the training data and do some data cleanup:
+
+```{r }
+library(caret)
+library(gbm)
+library(randomForest)
+
+
+# read in downloaded training data
+dat = read.csv("C:/Users/sunid/Downloads/pml-training.csv", row.names = 1)
+
+# take a look at the data
+# change class of dat$classe to factor
+# change NA to zero
+
+head(dat)
+dim(dat)
+class(dat$classe)
+dat$classe <- as.factor(dat$classe)
+dat[is.na(dat)] <- 0
+
+```
+
+## Identifying features
+
+Feature selection is an important aspect of machine learning pipelines. This dataset has many features, but all of them may not be useful, and may drastically decrease efficiency. First, we split the data into training and test sets. Then, to identify only the most important features, we first only keep features that are not highly correlated. On this subset of features, we then identify those that have near zero variance as they will not add to the discriminatory potential of the model. Finally, we remove the time_stamp and window features as these will not be necessary for the model.
+
+```{r}
+# set.seed
+set.seed(190)
+
+# create training and testing sets: 60:40 split
+
+inTrain <- createDataPartition(dat$classe, p = 0.6, list = FALSE)
+
+training <- dat[inTrain,]
+testing <- dat[-inTrain,]
+
+# identify highly correlating features to remove
+# calculate correlation matrix
+correlationMatrix <- cor(data.matrix(training[,-159]))
+
+
+
+# identify features that are highly corrected
+highCorr <- findCorrelation(correlationMatrix, cutoff=0.8, names = TRUE)
+
+# print indexes of highly correlated attributes
+highCorr
+
+# plotting highly correlating features
+library(corrplot)
+corrplot(correlationMatrix[, colnames(correlationMatrix) %in% highCorr], type = "upper", tl.col = "black", tl.srt = 45, tl.cex = 0.6)
+
+# make data frame with uncorrelated features
+trainMod <- data.frame(classe = as.factor(training$classe), training[, colnames(training) %in% highCorr])
+
+# check dimensions and column names of new training set
+dim(trainMod)
+colnames(trainMod)
+
+# remove "cvtd_timestamp" and "new_window" features
+trainMod <- (subset(trainMod, select = -c(cvtd_timestamp,new_window)))
+
+
+# check data frame
+head(trainMod)
+
+# remove features with near zero variance
+nzv <- nearZeroVar(trainMod)
+filtered_trainMod <- trainMod[, -nzv]
+```
+
+
+## Identifying the best machine learning algorithm
+
+After this, we will train models using various different machine learning algorithms available in the caret package. We will choose the best algorithm based on accuracy. For all methods, we use 5-fold cross validation.
+
+```{r}
+# train random forest
+# using 5-fold cross validation throughout
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = FALSE,
+                           savePredictions = TRUE,
+                           classProbs = TRUE)
+
+fit_rf <- train(classe ~. , data = filtered_trainMod, method = "rf", trControl = fitControl, preProcess = c("center", "scale"))
+
+fit_rf
+
+# train gbm
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = FALSE,
+                           savePredictions = TRUE,
+                           classProbs = TRUE)
+
+fit_gbm <- train(classe ~. , data = filtered_trainMod, method = "gbm", trControl = fitControl, preProcess = c("center", "scale"))
+
+fit_gbm
+
+# train rpart
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = FALSE,
+                           savePredictions = TRUE,
+                           classProbs = TRUE)
+
+fit_rpart <- train(classe ~. , data = filtered_trainMod, method = "rpart", trControl = fitControl, preProcess = c("center", "scale"))
+
+fit_rpart
+
+
+# train linear discriminant analysis
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = FALSE,
+                           savePredictions = TRUE,
+                           classProbs = TRUE)
+
+fit_lda <- train(classe ~. , data = filtered_trainMod, method = "lda", trControl = fitControl, preProcess = c("center", "scale"))
+
+fit_lda
+
+```
+
+
+Based on the accuracies, random forests performs best. We can look at the ROC curve for the random forest model. 
+
+```{r}
+# load library to make ROC plots
+library(MLeval)
+
+## run MLeval
+
+res <- evalm(fit_rf)
+
+```
+
+
+Using our random forest model for predicting the testing data and the associated confusion matrix:
+```{r}
+# Random forest has best accuracy based on training data
+# will move forward with random forest
+pred <- predict(fit_rf, testing)
+
+confusionMatrix(testing$classe, pred)
+
+```
+
+I expect out of sample accuracy to be slightly less than 97%.
